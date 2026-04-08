@@ -1,56 +1,89 @@
-import { useEffect, useState } from 'react';
-import { api } from '../utils/api';
+import { useEffect, useMemo, useState } from 'react';
+import { mockAssets } from '../utils/mockData';
 
-const buildQuery = (filters) => {
-  const searchParams = new URLSearchParams();
+const applyClientFilters = (assets, filters) => {
+  let result = [...assets];
 
-  Object.entries(filters).forEach(([key, value]) => {
-    if (value && value !== 'All') {
-      searchParams.set(key, value);
-    }
-  });
+  if (filters.type && filters.type !== 'All') {
+    const normalizedType = filters.type.toLowerCase().replace(/s$/, '');
+    result = result.filter((a) => a.type === normalizedType);
+  }
 
-  const queryString = searchParams.toString();
-  return queryString ? `?${queryString}` : '';
+  if (filters.search) {
+    const regex = new RegExp(filters.search, 'i');
+    result = result.filter((a) => regex.test(a.fileName) || regex.test(a.originalName));
+  }
+
+  const sort = filters.sort || 'newest';
+  const sortMap = {
+    newest: (a, b) => new Date(b.createdAt) - new Date(a.createdAt),
+    oldest: (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
+    name: (a, b) => a.fileName.localeCompare(b.fileName),
+    largest: (a, b) => b.size - a.size
+  };
+
+  result.sort(sortMap[sort] || sortMap.newest);
+  return result;
 };
 
 export const useAssets = (filters = {}) => {
-  const [assets, setAssets] = useState([]);
+  const [allAssets, setAllAssets] = useState(() => structuredClone(mockAssets));
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  const fetchAssets = async () => {
-    try {
-      setLoading(true);
-      setError('');
-      const data = await api.get(`/assets${buildQuery(filters)}`);
-      setAssets(data);
-    } catch (fetchError) {
-      setError(fetchError.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [error] = useState('');
 
   useEffect(() => {
-    fetchAssets();
-  }, [filters.search, filters.sort, filters.type]);
+    const timer = setTimeout(() => setLoading(false), 300);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const assets = useMemo(
+    () => applyClientFilters(allAssets, filters),
+    [allAssets, filters.search, filters.sort, filters.type]
+  );
 
   const uploadAsset = async (formData) => {
-    const created = await api.post('/assets/upload', formData);
-    await fetchAssets();
-    return created;
+    const file = formData.get('file');
+    const ext = file?.name?.split('.').pop()?.toUpperCase() || 'FILE';
+    const type = ['PNG', 'JPG', 'JPEG'].includes(ext) ? 'image' : ['MP4', 'MOV'].includes(ext) ? 'video' : 'document';
+
+    const newAsset = {
+      _id: `mock-${Date.now()}`,
+      fileName: file?.name || 'uploaded-file',
+      originalName: file?.name || 'uploaded-file',
+      type,
+      extension: ext,
+      mimeType: file?.type || 'application/octet-stream',
+      size: file?.size || 0,
+      url: file ? URL.createObjectURL(file) : '',
+      metadata: { resolution: 'Not available', duration: 'Not available' },
+      linkedCourses: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    setAllAssets((prev) => [newAsset, ...prev]);
+    return newAsset;
   };
 
   const deleteAsset = async (assetId) => {
-    const response = await api.delete(`/assets/${assetId}`);
-    await fetchAssets();
-    return response;
+    setAllAssets((prev) => prev.filter((a) => a._id !== assetId));
+    return { message: 'Asset deleted successfully.' };
   };
 
   const linkAsset = async (assetId, courseId) => {
-    const updated = await api.patch(`/assets/${assetId}/link`, { courseId });
-    await fetchAssets();
+    let updated;
+    setAllAssets((prev) =>
+      prev.map((a) => {
+        if (a._id === assetId) {
+          updated = {
+            ...a,
+            linkedCourses: [...a.linkedCourses, { _id: courseId, code: 'Linked', title: 'Course' }]
+          };
+          return updated;
+        }
+        return a;
+      })
+    );
     return updated;
   };
 
@@ -58,10 +91,9 @@ export const useAssets = (filters = {}) => {
     assets,
     loading,
     error,
-    refetch: fetchAssets,
+    refetch: () => {},
     uploadAsset,
     deleteAsset,
     linkAsset
   };
 };
-

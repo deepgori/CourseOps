@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '../utils/api';
+import { mockOverview, mockCompletion, mockDepartments, mockActivity } from '../utils/mockData';
 
 export const useReports = () => {
   const [data, setData] = useState({
@@ -9,39 +9,35 @@ export const useReports = () => {
     activity: []
   });
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  const fetchReports = async () => {
-    try {
-      setLoading(true);
-      setError('');
-      const [overview, completion, departments, activity] = await Promise.all([
-        api.get('/reports/overview'),
-        api.get('/reports/completion'),
-        api.get('/reports/departments'),
-        api.get('/reports/activity')
-      ]);
-
-      setData({ overview, completion, departments, activity });
-    } catch (fetchError) {
-      setError(fetchError.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [error] = useState('');
 
   useEffect(() => {
-    fetchReports();
+    const timer = setTimeout(() => {
+      setData({
+        overview: mockOverview,
+        completion: mockCompletion,
+        departments: mockDepartments,
+        activity: mockActivity.slice(0, 10)
+      });
+      setLoading(false);
+    }, 400);
+
+    return () => clearTimeout(timer);
   }, []);
 
-  const exportCsv = async () => api.download('/reports/export');
+  const exportCsv = async () => {
+    const rows = mockDepartments.summary.map((s) =>
+      [s.department, s.totalCourses, s.completed, s.inProgress, s.overdue, `${s.completionRate}%`, s.averageHealth, `${s.averageAccessibility}%`].join(',')
+    );
+    const csv = ['Department,Total Courses,Completed,In Progress,Overdue,Completion Rate,Average Health,Accessibility Progress', ...rows].join('\n');
+    return new Blob([csv], { type: 'text/csv' });
+  };
 
   return {
     ...data,
     loading,
     error,
-    refetch: fetchReports,
+    refetch: () => {},
     exportCsv
   };
 };
-

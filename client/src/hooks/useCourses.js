@@ -1,64 +1,101 @@
-import { useEffect, useState } from 'react';
-import { api } from '../utils/api';
+import { useEffect, useMemo, useState } from 'react';
+import { mockCourses } from '../utils/mockData';
 
-const buildQuery = (filters) => {
-  const searchParams = new URLSearchParams();
+const applyClientFilters = (courses, filters) => {
+  let result = [...courses];
 
-  Object.entries(filters).forEach(([key, value]) => {
-    if (value && value !== 'All') {
-      searchParams.set(key, value);
-    }
-  });
+  if (filters.status && filters.status !== 'All') {
+    result = result.filter((c) => c.status === filters.status);
+  }
 
-  const queryString = searchParams.toString();
-  return queryString ? `?${queryString}` : '';
+  if (filters.department && filters.department !== 'All') {
+    result = result.filter((c) => c.department === filters.department);
+  }
+
+  if (filters.assignee && filters.assignee !== 'All') {
+    result = result.filter((c) => c.assignee.name === filters.assignee);
+  }
+
+  if (filters.priority && filters.priority !== 'All') {
+    result = result.filter((c) => c.priority === filters.priority);
+  }
+
+  if (filters.search) {
+    const regex = new RegExp(filters.search, 'i');
+    result = result.filter((c) => regex.test(c.title) || regex.test(c.code));
+  }
+
+  return result;
 };
 
 export const useCourses = (filters = {}) => {
-  const [courses, setCourses] = useState([]);
+  const [allCourses, setAllCourses] = useState(() => structuredClone(mockCourses));
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  const fetchCourses = async () => {
-    try {
-      setLoading(true);
-      setError('');
-      const data = await api.get(`/courses${buildQuery(filters)}`);
-      setCourses(data);
-    } catch (fetchError) {
-      setError(fetchError.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [error] = useState('');
 
   useEffect(() => {
-    fetchCourses();
-  }, [filters.assignee, filters.department, filters.priority, filters.search, filters.status]);
+    const timer = setTimeout(() => setLoading(false), 350);
+    return () => clearTimeout(timer);
+  }, []);
 
-  const getCourse = async (courseId) => api.get(`/courses/${courseId}`);
+  const courses = useMemo(
+    () => applyClientFilters(allCourses, filters),
+    [allCourses, filters.assignee, filters.department, filters.priority, filters.search, filters.status]
+  );
+
+  const getCourse = async (courseId) => {
+    const course = allCourses.find((c) => c._id === courseId);
+    if (!course) throw new Error('Course not found.');
+    return structuredClone(course);
+  };
 
   const createCourse = async (payload) => {
-    const created = await api.post('/courses', payload);
-    await fetchCourses();
-    return created;
+    const newCourse = {
+      _id: `mock-${Date.now()}`,
+      ...payload,
+      blockers: [],
+      accessibility: { captions: 0, altText: 0, documents: 0, checklist: 0, flaggedIssues: [] },
+      automation: { reviewAutoAssigned: false, lastAutoAssignedAt: null },
+      assets: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      publishedAt: null,
+      metrics: { healthScore: 55, riskLevel: 'Medium', accessibilityProgress: 0, unresolvedBlockerCount: 0, unresolvedBlockers: [], isOverdue: false, recommendation: 'Link supporting assets to reduce launch risk.' }
+    };
+    setAllCourses((prev) => [newCourse, ...prev]);
+    return newCourse;
   };
 
   const updateCourse = async (courseId, payload) => {
-    const updated = await api.put(`/courses/${courseId}`, payload);
-    await fetchCourses();
+    let updated;
+    setAllCourses((prev) =>
+      prev.map((c) => {
+        if (c._id === courseId) {
+          updated = { ...c, ...payload, updatedAt: new Date().toISOString() };
+          return updated;
+        }
+        return c;
+      })
+    );
     return updated;
   };
 
   const deleteCourse = async (courseId) => {
-    const response = await api.delete(`/courses/${courseId}`);
-    await fetchCourses();
-    return response;
+    setAllCourses((prev) => prev.filter((c) => c._id !== courseId));
+    return { message: 'Course deleted successfully.' };
   };
 
   const updateCourseStatus = async (courseId, status) => {
-    const updated = await api.patch(`/courses/${courseId}/status`, { status });
-    setCourses((current) => current.map((course) => (course._id === courseId ? updated : course)));
+    let updated;
+    setAllCourses((prev) =>
+      prev.map((c) => {
+        if (c._id === courseId) {
+          updated = { ...c, status, updatedAt: new Date().toISOString() };
+          return updated;
+        }
+        return c;
+      })
+    );
     return updated;
   };
 
@@ -66,7 +103,7 @@ export const useCourses = (filters = {}) => {
     courses,
     loading,
     error,
-    refetch: fetchCourses,
+    refetch: () => {},
     getCourse,
     createCourse,
     updateCourse,
@@ -74,4 +111,3 @@ export const useCourses = (filters = {}) => {
     updateCourseStatus
   };
 };
-
